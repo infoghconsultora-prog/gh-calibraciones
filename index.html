@@ -23,14 +23,38 @@
   a{color:inherit;}
 
   /* ---------- login screen ---------- */
-  #loginScreen{ min-height:100vh; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:18px; text-align:center; padding:24px; }
-  #loginScreen .logo{ font-weight:800; font-size:40px; letter-spacing:-1px;
-    background:linear-gradient(135deg, var(--brand-dark), var(--brand));
-    -webkit-background-clip:text; background-clip:text; color:transparent; }
-  #loginScreen h1{ font-size:20px; margin:0; }
-  #loginScreen p{ color:var(--ink-soft); font-size:14px; max-width:360px; margin:0; }
-  #loginError{ color:var(--rojo); font-size:13.5px; font-weight:600; display:none; max-width:360px; }
-  #loginSpinner{ display:none; color:var(--ink-soft); font-size:13px; }
+  #loginScreen{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .login-card{ background:var(--card); border-radius:20px; padding:40px 36px; max-width:420px; width:100%;
+    text-align:center; box-shadow:0 2px 4px rgba(43,47,38,.10), 0 16px 40px rgba(43,47,38,.14); }
+  .login-logo{ display:block; height:64px; max-width:100%; margin:0 auto 18px; }
+  #loginScreen h1{ font-size:22px; line-height:28px; font-weight:600; margin:0 0 8px; letter-spacing:-.35px; }
+  #loginScreen p{ font-size:15px; line-height:20px; color:var(--ink-soft); margin:0 0 24px; }
+  #gsiButton{ display:flex; justify-content:center; }
+  #loginSpinner{ display:none; margin-top:18px; }
+  .loading-track{ position:relative; width:220px; max-width:100%; height:4px; margin:0 auto;
+    border-radius:999px; background:var(--line); overflow:hidden; }
+  .loading-glow{ position:absolute; top:0; left:0; height:100%; width:36%; border-radius:999px;
+    background:linear-gradient(90deg, transparent, var(--brand-dark) 50%, transparent);
+    animation:barrido 1.5s ease-in-out infinite; }
+  @keyframes barrido{
+    0%{ transform:translateX(-110%); }
+    100%{ transform:translateX(390%); }
+  }
+  .loading-msg{ margin-top:12px; font-size:13px; line-height:18px; color:var(--ink-soft);
+    transition:opacity .3s cubic-bezier(0.32,0.72,0,1); min-height:18px; }
+  #loginError{ display:none; font-size:15px; line-height:20px; color:var(--rojo); font-weight:600;
+    margin-top:14px; background:var(--rojo-bg); border-radius:10px; padding:12px 14px; }
+  #loginError button{ display:block; margin:10px auto 0; border:none; cursor:pointer;
+    background:var(--rojo); color:#fff; font-size:14px; font-weight:600;
+    border-radius:999px; padding:8px 18px; }
+  #loginError button:active{ transform:scale(.96); }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .loading-glow{ background:linear-gradient(90deg, transparent, #8dc63f 50%, transparent); } }
+  :root[data-theme="dark"] .loading-glow{ background:linear-gradient(90deg, transparent, #8dc63f 50%, transparent); }
+  @media (prefers-reduced-motion: reduce){
+    .loading-glow{ animation:none; width:100%; opacity:.55; transform:none; }
+    .loading-msg{ transition:none; }
+  }
+  @media (max-width:420px){ .login-card{ padding:32px 22px; } }
 
   /* ---------- dashboard screen ---------- */
   #dashboardScreen{ display:none; }
@@ -166,12 +190,18 @@
 <button id="themeToggle" type="button" aria-label="Cambiar tema claro/oscuro"></button>
 
 <div id="loginScreen">
-  <div class="logo">GH</div>
-  <h1>Dashboard de Calibraciones</h1>
-  <p>GH Consultora · Mediciones y Monitoreos<br>Iniciá sesión con una cuenta de Google autorizada para ver el estado de calibración de los equipos.</p>
-  <div id="gsiButton"></div>
-  <div id="loginSpinner">Verificando acceso...</div>
-  <div id="loginError"></div>
+  <div class="login-card">
+    <img class="login-logo" src="logo_gh.png" alt="GH Consultora">
+    <h1>Dashboard de Calibraciones</h1>
+    <p>GH Consultora · Mediciones y Monitoreos<br>Iniciá sesión con una cuenta de Google autorizada para ver el estado de calibración de los equipos.</p>
+    <div id="gsiButton"></div>
+    <div id="loginSpinner">
+      <div class="loading-track"><div class="loading-glow"></div></div>
+      <div id="loadingMsg" class="loading-msg">Verificando tu acceso…</div>
+    </div>
+    <div id="loginError"></div>
+  </div>
+</div>
 </div>
 
 <div id="dashboardScreen">
@@ -279,7 +309,7 @@
   // para que una pestaña vieja se entere sola de que hay una version mas
   // nueva, en vez de quedarse corriendo el codigo con el que cargo para
   // siempre. Mismo mecanismo que en Seguimiento Ambiental.
-  var FRONTEND_VERSION = '2026-09-25T14:10';
+  var FRONTEND_VERSION = '2026-10-09T13:55';
 
   var idToken = null;
   var EQUIPOS = [];
@@ -446,34 +476,94 @@
   document.addEventListener('visibilitychange', function () { if (!document.hidden) chequearVersionFrontend(); });
   document.getElementById('btnRecargarVersion').addEventListener('click', function () { location.reload(); });
 
+  var MENSAJES_CARGA = [
+    'Verificando tu acceso…',
+    'Cargando los equipos…',
+    'Revisando los vencimientos…',
+    'Preparando el panel…',
+    'Ya casi está…'
+  ];
+  var cargaIntervalo = null;
+  var cargaRelojMsg = null;
+
+  function iniciarCargaVisual() {
+    var msg = document.getElementById('loadingMsg');
+    var i = 0;
+    document.getElementById('loginSpinner').style.display = 'block';
+    msg.style.opacity = 1;
+    msg.textContent = MENSAJES_CARGA[0];
+    clearInterval(cargaIntervalo);
+    clearTimeout(cargaRelojMsg);
+    cargaIntervalo = setInterval(function () {
+      i = (i + 1) % MENSAJES_CARGA.length;
+      msg.style.opacity = 0;
+      cargaRelojMsg = setTimeout(function () { msg.textContent = MENSAJES_CARGA[i]; msg.style.opacity = 1; }, 300);
+    }, 2200);
+  }
+
+  function detenerCargaVisual() {
+    clearInterval(cargaIntervalo);
+    clearTimeout(cargaRelojMsg);
+    cargaIntervalo = null;
+    cargaRelojMsg = null;
+    document.getElementById('loginSpinner').style.display = 'none';
+  }
+
+  function mostrarErrorLogin(texto, conRecarga) {
+    var err = document.getElementById('loginError');
+    err.textContent = '';
+    err.appendChild(document.createTextNode(texto));
+    if (conRecarga) {
+      err.appendChild(document.createTextNode(' Casi siempre se arregla recargando la página con la versión más nueva.'));
+      var rastro = document.createElement('div');
+      rastro.style.cssText = 'font-size:12px;font-weight:400;opacity:.8;margin-top:6px';
+      rastro.textContent = ultimoFalloBackend;
+      err.appendChild(rastro);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Recargar';
+      btn.addEventListener('click', function () {
+        location.replace(location.pathname + '?recargar=' + Date.now());
+      });
+      err.appendChild(btn);
+    }
+    err.style.display = 'block';
+  }
+
   function handleCredentialResponse(response) {
     idToken = response.credential;
     document.getElementById('gsiButton').style.display = 'none';
-    document.getElementById('loginSpinner').style.display = 'block';
     document.getElementById('loginError').style.display = 'none';
+    iniciarCargaVisual();
+    intentarLogin(true);
+  }
 
+  // El primer pedido tras un arranque en frio de Apps Script a veces falla solo:
+  // se reintenta una vez en silencio antes de decir "cuenta no autorizada".
+  function intentarLogin(primerIntento) {
     callBackend('getData', {}).then(function (data) {
-      document.getElementById('loginSpinner').style.display = 'none';
       if (!data.ok) {
+        if (primerIntento) return intentarLogin(false);
+        detenerCargaVisual();
         idToken = null;
-        document.getElementById('gsiButton').style.display = 'block';
-        var err = document.getElementById('loginError');
-        err.textContent = 'Esta cuenta no está autorizada para ver el dashboard. Pedile a GH Consultora que agregue tu email a la lista.';
-        err.style.display = 'block';
+        document.getElementById('gsiButton').style.display = 'flex';
+        mostrarErrorLogin('Esta cuenta no está autorizada. Pedile a GH Consultora que agregue tu email a la lista.', false);
         return;
       }
       EQUIPOS = data.equipos;
       document.getElementById('accountEmail').textContent = data.email;
+      detenerCargaVisual();
       document.getElementById('loginScreen').style.display = 'none';
       document.getElementById('dashboardScreen').style.display = 'block';
       fillEquipoSelect();
       render(EQUIPOS);
-    }).catch(function () {
-      document.getElementById('loginSpinner').style.display = 'none';
-      document.getElementById('gsiButton').style.display = 'block';
-      var err = document.getElementById('loginError');
-      err.textContent = 'No se pudo conectar con el backend. Probá de nuevo en un momento.' + (ultimoFalloBackend ? ' (' + ultimoFalloBackend + ')' : '');
-      err.style.display = 'block';
+    }).catch(function (fallo) {
+      detenerCargaVisual();
+      document.getElementById('gsiButton').style.display = 'flex';
+      var causa = (fallo && fallo.name === 'AbortError') ? 'El backend tardó demasiado en responder.'
+        : (fallo && fallo.name === 'RespuestaInvalida') ? 'Google devolvió una respuesta inesperada.'
+        : 'No se pudo conectar con el backend.';
+      mostrarErrorLogin(causa, true);
     });
   }
 
@@ -483,7 +573,7 @@
     google.accounts.id.disableAutoSelect();
     document.getElementById('dashboardScreen').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';
-    document.getElementById('gsiButton').style.display = 'block';
+    document.getElementById('gsiButton').style.display = 'flex';
   });
 
   document.getElementById('refreshBtn').addEventListener('click', function () {
